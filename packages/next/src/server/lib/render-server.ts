@@ -8,13 +8,6 @@ import { PropagateToWorkersField } from './router-utils/types'
 
 export const WORKER_SELF_EXIT_CODE = 77
 
-let result:
-  | undefined
-  | {
-      port: number
-      hostname: string
-    }
-
 let app: ReturnType<typeof next> | undefined
 
 let sandboxContext: undefined | typeof import('../web/sandbox/context')
@@ -41,13 +34,20 @@ export function deleteCache(filePaths: string[]) {
   }
 }
 
+let initialization:
+  | Promise<
+      NonNullable<{
+        port: number
+        hostname: string
+      }>
+    >
+  | undefined
+
 export async function propagateServerField(
   field: PropagateToWorkersField,
   value: any
 ) {
-  if (!app) {
-    throw new Error('Invariant cant propagate server field, no app initialized')
-  }
+  await initialization
   let appField = (app as any).server
 
   if (appField) {
@@ -62,7 +62,7 @@ export async function propagateServerField(
   }
 }
 
-export async function initialize(opts: {
+async function initializeImpl(opts: {
   dir: string
   port: number
   dev: boolean
@@ -73,13 +73,12 @@ export async function initialize(opts: {
   keepAliveTimeout?: number
   serverFields?: any
   experimentalTestProxy: boolean
-}): Promise<NonNullable<typeof result>> {
-  // if we already setup the server return as we only need to do
-  // this on first worker boot
-  if (result) {
-    return result
-  }
-
+}): Promise<
+  NonNullable<{
+    port: number
+    hostname: string
+  }>
+> {
   const type = process.env.__NEXT_PRIVATE_RENDER_WORKER
   if (type) {
     process.title = 'next-render-worker-' + type
@@ -113,10 +112,20 @@ export async function initialize(opts: {
   upgradeHandler = app.getUpgradeHandler()
   await app.prepare(opts.serverFields)
 
-  result = {
+  return {
     port,
     hostname: formatHostname(hostname),
   }
+}
 
-  return result
+export async function initialize(
+  opts: Parameters<typeof initializeImpl>[0]
+): ReturnType<typeof initializeImpl> {
+  // if we already setup the server return as we only need to do
+  // this on first worker boot
+  if (initialization) {
+    return initialization
+  }
+  initialization = initializeImpl(opts)
+  return initialization
 }
